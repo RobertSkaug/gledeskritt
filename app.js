@@ -1,7 +1,10 @@
 const METERS_PER_STEP = 0.75;
+const STEP_TOLERANCE = 100;
+const METER_TOLERANCE = STEP_TOLERANCE * METERS_PER_STEP;
 const HISTORY_KEY = "onsketur_history_v1";
 const SEEN_KEY = "onsketur_seen_v1";
-const MAX_CANDIDATES = 14;
+const MAX_CANDIDATES = 18;
+const MAX_SEARCH_ROUNDS = 3;
 
 const stepsInput = document.getElementById("steps");
 const suggestBtn = document.getElementById("suggestBtn");
@@ -146,10 +149,10 @@ async function fetchRouteForCandidate(candidate) {
   };
 }
 
-function buildCandidates(targetMeters) {
+function buildCandidates(targetMeters, round = 0) {
   const radius = Math.max(250, targetMeters / 3.2);
   const candidates = [];
-  const base = Math.random() * 360;
+  const base = (Math.random() * 360 + round * 31) % 360;
 
   for (let i = 0; i < MAX_CANDIDATES; i += 1) {
     const firstBearing = (base + i * 23) % 360;
@@ -212,40 +215,64 @@ async function suggestRoute() {
   suggestBtn.disabled = true;
 
   try {
-    const candidates = buildCandidates(targetMeters);
     const seen = new Set(getSeen());
+    let accepted = null;
     let best = null;
     let smallestDiff = Number.POSITIVE_INFINITY;
 
-    for (const candidate of candidates) {
-      const route = await fetchRouteForCandidate(candidate);
-      if (!route) {
-        continue;
-      }
+    for (let round = 0; round < MAX_SEARCH_ROUNDS && !accepted; round += 1) {
+      const candidates = buildCandidates(targetMeters, round);
 
-      const hash = hashRoute(route.geometry, route.meters);
-      if (seen.has(hash)) {
-        continue;
-      }
+      for (const candidate of candidates) {
+        const route = await fetchRouteForCandidate(candidate);
+        if (!route) {
+          continue;
+        }
 
-      const diff = Math.abs(route.meters - targetMeters);
-      if (diff < smallestDiff) {
-        best = { ...route, hash };
-        smallestDiff = diff;
+        const hash = hashRoute(route.geometry, route.meters);
+        if (seen.has(hash)) {
+          continue;
+        }
+
+        const diff = Math.abs(route.meters - targetMeters);
+        if (diff < smallestDiff) {
+          best = { ...route, hash };
+          smallestDiff = diff;
+        }
+
+        if (diff <= METER_TOLERANCE) {
+          accepted = { ...route, hash };
+          break;
+        }
       }
     }
 
-    if (!best) {
+    if (!accepted) {
+      if (best) {
+        const bestSteps = Math.round(best.meters / METERS_PER_STEP);
+        const stepDelta = Math.abs(bestSteps - steps);
+        statusEl.textContent = `Fant ingen nye turer innen ±${STEP_TOLERANCE} skritt. Nærmeste var ${stepDelta} skritt unna.`;
+      } else {
+        statusEl.textContent = `Fant ingen nye turer innen ±${STEP_TOLERANCE} skritt. Prøv annet startpunkt.`;
+      }
+      suggestionEl.textContent = "Ingen rute innen ønsket toleranse akkurat nå.";
+      return;
+    }
+
+    const bestMatch = accepted;
+
+    if (!bestMatch) {
       statusEl.textContent = "Fant ingen nye turer nå. Prøv annet startpunkt eller skrittmål.";
       return;
     }
 
-    drawRoute(best.geometry);
-    const distanceKm = (best.meters / 1000).toFixed(2);
-    const estimatedSteps = Math.round(best.meters / METERS_PER_STEP);
+    drawRoute(bestMatch.geometry);
+    const distanceKm = (bestMatch.meters / 1000).toFixed(2);
+    const estimatedSteps = Math.round(bestMatch.meters / METERS_PER_STEP);
 
-    suggestionEl.textContent = `Ca. ${distanceKm} km (${estimatedSteps} skritt), estimert tid ${formatDuration(best.seconds)}.`;
-    statusEl.textContent = "Nytt turforslag klart.";
+    const stepDelta = Math.abs(estimatedSteps - steps);
+    suggestionEl.textContent = `Ca. ${distanceKm} km (${estimatedSteps} skritt), estimert tid ${formatDuration(bestMatch.seconds)}.`;
+    statusEl.textContent = `Nytt turforslag klart (avvik ${stepDelta} skritt).`;
 
     const now = new Date();
     saveSuggestion(
@@ -260,7 +287,7 @@ async function suggestRoute() {
         steps: estimatedSteps,
         distanceKm,
       },
-      best.hash
+      bestMatch.hash
     );
 
     renderHistory();

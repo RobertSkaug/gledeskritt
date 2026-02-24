@@ -6,6 +6,7 @@ Mobilvennlig webapp som foreslår gåturer basert på ønsket antall skritt.
 
 - Velg startpunkt ved å trykke i kartet (pin oppdateres).
 - Skriv inn ønsket antall skritt og hent turforslag.
+- Turforslag må være innen ±100 skritt fra ønsket verdi.
 - Foreslåtte turer logges lokalt i nettleseren.
 - Tidligere forslag blir markert som brukt, så samme tur ikke foreslås igjen.
 
