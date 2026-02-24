@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="no">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ønsketur</title>
+  <meta name="theme-color" content="#1565c0" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="top">
+      <h1>Ønsketur</h1>
+      <p>Finn rundtur i nærområdet basert på skritt.</p>
+    </header>
+
+    <section class="panel controls">
+      <label for="steps">Ønsket antall skritt</label>
+      <div class="input-row">
+        <input id="steps" type="number" min="500" step="100" value="4000" inputmode="numeric" />
+        <button id="suggestBtn" type="button">Få turforslag</button>
+      </div>
+      <button id="installBtn" type="button" class="secondary install hidden">Installer app</button>
+      <small>Trykk i kartet for å velge startpunkt.</small>
+      <p id="status" class="status">Henter posisjon…</p>
+    </section>
+
+    <section class="map-wrap">
+      <div id="map" role="region" aria-label="Kart"></div>
+    </section>
+
+    <section class="panel result">
+      <h2>Siste forslag</h2>
+      <div id="suggestion" class="suggestion">Ingen tur foreslått ennå.</div>
+    </section>
+
+    <section class="panel history">
+      <div class="history-head">
+        <h2>Logg</h2>
+        <button id="clearHistoryBtn" type="button" class="secondary">Tøm logg</button>
+      </div>
+      <ul id="historyList"></ul>
+    </section>
+  </main>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script src="./app.js"></script>
+</body>
+</html>
