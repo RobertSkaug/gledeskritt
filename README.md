@@ -37,6 +37,14 @@ python -m http.server 8080
 - Etter installasjon kan den åpnes fra hjemskjermen som en egen app.
 - Første gang må enheten ha nett for å laste kart/rutetjenester.
 
+## Publisering på GitHub Pages
+
+Repoet er satt opp med workflow for automatisk publisering ved push til `main`.
+
+- Forventet URL: `https://robertskaug.github.io/gledeskritt/`
+- Første gang: gå til repo → **Settings** → **Pages** og sett **Source** til **GitHub Actions**.
+- Deretter publiseres nye endringer automatisk.
+
 ## Teknisk
 
 - Kart: Leaflet + OpenStreetMap
