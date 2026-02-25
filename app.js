@@ -1,6 +1,4 @@
 const WALKING_STRIDE_METERS = 0.75;
-const STEP_TOLERANCE = 200;
-const METER_TOLERANCE = STEP_TOLERANCE * WALKING_STRIDE_METERS;
 const MIN_STEPS = 500;
 const MIN_METERS = Math.round(MIN_STEPS * WALKING_STRIDE_METERS);
 const HISTORY_KEY = "onsketur_history_v1";
@@ -12,8 +10,86 @@ const ROUTE_BATCH_SIZE = 6;
 const OVERPASS_REQUEST_TIMEOUT_MS = 3000;
 const WALKABLE_FETCH_SOFT_TIMEOUT_MS = 2500;
 const WALKABLE_FETCH_RADIUS_MIN = 800;
-const WALKABLE_FETCH_RADIUS_MAX = 3500;
+const WALKABLE_FETCH_RADIUS_MAX = 5500;
 const WALKABLE_MAX_WAYS = 450;
+const SEARCH_STAGES = [
+  {
+    label: "±5%",
+    tolerancePct: 0.05,
+    radiusScale: 0.75,
+    waypointCounts: [2, 3],
+  },
+  {
+    label: "±10%",
+    tolerancePct: 0.1,
+    radiusScale: 0.95,
+    waypointCounts: [2, 3, 4],
+  },
+  {
+    label: "±15%",
+    tolerancePct: 0.15,
+    radiusScale: 1.2,
+    waypointCounts: [3, 4],
+  },
+];
+const OSLO_CENTER = { lat: 59.9139, lng: 10.7522 };
+const OSLO_FALLBACK_MAX_DISTANCE = 6500;
+const OSLO_FALLBACK_LOOPS = [
+  {
+    name: "Akerselva loop",
+    approxMeters: 5200,
+    waypoints: [
+      { lat: 59.922, lng: 10.7537 },
+      { lat: 59.9138, lng: 10.7411 },
+      { lat: 59.9079, lng: 10.7582 },
+    ],
+  },
+  {
+    name: "Aker Brygge og Tjuvholmen",
+    approxMeters: 4300,
+    waypoints: [
+      { lat: 59.9107, lng: 10.7286 },
+      { lat: 59.9052, lng: 10.7237 },
+      { lat: 59.9081, lng: 10.7375 },
+    ],
+  },
+  {
+    name: "Frognerparken loop",
+    approxMeters: 6200,
+    waypoints: [
+      { lat: 59.9262, lng: 10.7065 },
+      { lat: 59.9196, lng: 10.7023 },
+      { lat: 59.9138, lng: 10.7218 },
+    ],
+  },
+  {
+    name: "St. Hanshaugen loop",
+    approxMeters: 3800,
+    waypoints: [
+      { lat: 59.9254, lng: 10.7461 },
+      { lat: 59.9201, lng: 10.7595 },
+      { lat: 59.9138, lng: 10.7482 },
+    ],
+  },
+  {
+    name: "Ekeberg loop",
+    approxMeters: 7100,
+    waypoints: [
+      { lat: 59.8987, lng: 10.7821 },
+      { lat: 59.8937, lng: 10.7706 },
+      { lat: 59.9052, lng: 10.7592 },
+    ],
+  },
+  {
+    name: "Bjørvika-Hovinbyen loop",
+    approxMeters: 5600,
+    waypoints: [
+      { lat: 59.9083, lng: 10.7618 },
+      { lat: 59.9176, lng: 10.7839 },
+      { lat: 59.9135, lng: 10.7643 },
+    ],
+  },
+];
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
@@ -308,6 +384,79 @@ function cacheKeyForWalkable(radiusMeters) {
   return `${roundedLat}|${roundedLng}|${roundedRadius}`;
 }
 
+function normalizedSegmentKey(a, b) {
+  const aLng = a[0].toFixed(5);
+  const aLat = a[1].toFixed(5);
+  const bLng = b[0].toFixed(5);
+  const bLat = b[1].toFixed(5);
+  const first = `${aLng},${aLat}`;
+  const second = `${bLng},${bLat}`;
+  return first < second ? `${first}|${second}` : `${second}|${first}`;
+}
+
+function routeBacktrackRatio(geometry) {
+  const coordinates = geometry?.coordinates || [];
+  if (coordinates.length < 2) {
+    return 1;
+  }
+
+  const seenSegments = new Set();
+  let repeated = 0;
+  let total = 0;
+
+  for (let i = 1; i < coordinates.length; i += 1) {
+    const prev = coordinates[i - 1];
+    const next = coordinates[i];
+    const segmentMeters = haversineMeters(
+      { lat: prev[1], lng: prev[0] },
+      { lat: next[1], lng: next[0] }
+    );
+
+    if (segmentMeters <= 0) {
+      continue;
+    }
+
+    total += segmentMeters;
+    const key = normalizedSegmentKey(prev, next);
+    if (seenSegments.has(key)) {
+      repeated += segmentMeters;
+    } else {
+      seenSegments.add(key);
+    }
+  }
+
+  if (total <= 0) {
+    return 1;
+  }
+
+  return repeated / total;
+}
+
+function routeQualityScore(route, targetMeters) {
+  const distanceDelta = Math.abs(route.meters - targetMeters);
+  const loopPenalty = routeBacktrackRatio(route.geometry);
+  return distanceDelta + loopPenalty * targetMeters * 0.35;
+}
+
+function isNearOsloCenter(point) {
+  return haversineMeters(point, OSLO_CENTER) <= OSLO_FALLBACK_MAX_DISTANCE;
+}
+
+function getOsloFallbackCandidates(targetMeters) {
+  return OSLO_FALLBACK_LOOPS
+    .slice()
+    .sort(
+      (a, b) =>
+        Math.abs(a.approxMeters - targetMeters) - Math.abs(b.approxMeters - targetMeters)
+    )
+    .slice(0, 6)
+    .map((template) => ({
+      waypoints: template.waypoints,
+      templateName: template.name,
+      isOsloFallback: true,
+    }));
+}
+
 function buildOverpassQuery(radiusMeters, maxWays) {
   return `[out:json][timeout:25];
 (
@@ -355,10 +504,10 @@ function withTimeout(promise, timeoutMs, fallbackValue) {
   });
 }
 
-async function fetchWalkablePoints(targetMeters) {
+async function fetchWalkablePoints(targetMeters, radiusScale = 0.75) {
   const radiusMeters = Math.min(
     WALKABLE_FETCH_RADIUS_MAX,
-    Math.max(WALKABLE_FETCH_RADIUS_MIN, targetMeters * 0.75)
+    Math.max(WALKABLE_FETCH_RADIUS_MIN, targetMeters * radiusScale)
   );
   const key = cacheKeyForWalkable(radiusMeters);
 
@@ -406,10 +555,20 @@ async function fetchWalkablePoints(targetMeters) {
 }
 
 async function fetchRouteForCandidate(candidate) {
+  const waypoints = Array.isArray(candidate.waypoints)
+    ? candidate.waypoints.filter(
+        (point) =>
+          point && Number.isFinite(point.lat) && Number.isFinite(point.lng)
+      )
+    : [];
+
+  if (!waypoints.length) {
+    return null;
+  }
+
   const coordinates = [
     `${startPoint.lng},${startPoint.lat}`,
-    `${candidate.w1.lng},${candidate.w1.lat}`,
-    `${candidate.w2.lng},${candidate.w2.lat}`,
+    ...waypoints.map((point) => `${point.lng},${point.lat}`),
     `${startPoint.lng},${startPoint.lat}`,
   ].join(";");
 
@@ -431,36 +590,42 @@ async function fetchRouteForCandidate(candidate) {
     seconds: route.duration,
     geometry: route.geometry,
     legs: route.legs,
-    waypoints: [candidate.w1, candidate.w2],
+    waypoints,
+    templateName: candidate.templateName || null,
+    isOsloFallback: Boolean(candidate.isOsloFallback),
   };
 }
 
-function buildFallbackCandidates(targetMeters, round = 0) {
-  const radius = Math.max(250, targetMeters / 3.2);
+function buildFallbackCandidates(targetMeters, round = 0, waypointCount = 2) {
+  const radius = Math.max(250, targetMeters / (waypointCount + 1));
   const candidates = [];
-  const base = (Math.random() * 360 + round * 31) % 360;
+  const base = (Math.random() * 360 + round * 31 + waypointCount * 17) % 360;
+  const spread = 360 / waypointCount;
 
   for (let i = 0; i < MAX_CANDIDATES; i += 1) {
-    const firstBearing = (base + i * 23) % 360;
-    const secondBearing = (firstBearing + 110 + (i % 5) * 6) % 360;
+    const waypoints = [];
+    for (let waypointIndex = 0; waypointIndex < waypointCount; waypointIndex += 1) {
+      const bearing = (base + spread * waypointIndex + i * (13 + waypointIndex * 3)) % 360;
+      const distanceScale = 0.82 + ((i + waypointIndex) % 5) * 0.06;
+      waypoints.push(
+        destinationPoint(startPoint.lat, startPoint.lng, radius * distanceScale, bearing)
+      );
+    }
 
-    candidates.push({
-      w1: destinationPoint(startPoint.lat, startPoint.lng, radius, firstBearing),
-      w2: destinationPoint(startPoint.lat, startPoint.lng, radius * 0.85, secondBearing),
-    });
+    candidates.push({ waypoints });
   }
 
   return candidates;
 }
 
-function buildNetworkCandidates(targetMeters, round = 0, walkablePoints = []) {
+function buildNetworkCandidates(targetMeters, round = 0, walkablePoints = [], waypointCount = 2) {
   if (walkablePoints.length < 8) {
     return [];
   }
 
   const minLeg = 120;
-  const maxLeg = Math.max(500, targetMeters * 0.75);
-  const idealLeg = Math.max(250, targetMeters / 3.2);
+  const maxLeg = Math.max(500, targetMeters * 0.8);
+  const idealLeg = Math.max(220, targetMeters / (waypointCount + 1));
 
   const usable = walkablePoints
     .map((point) => {
@@ -480,40 +645,68 @@ function buildNetworkCandidates(targetMeters, round = 0, walkablePoints = []) {
 
   const baseIndex = (round * 11) % usable.length;
   const scoredCandidates = [];
-  const attempts = Math.min(usable.length * 2, MAX_CANDIDATES * 5);
+  const attempts = Math.min(usable.length * 3, MAX_CANDIDATES * 7);
 
   for (let i = 0; i < attempts; i += 1) {
-    const first = usable[(baseIndex + i * 3) % usable.length];
-    const second = usable[(baseIndex + i * 7 + 5) % usable.length];
+    const waypoints = [];
+    for (let waypointIndex = 0; waypointIndex < waypointCount; waypointIndex += 1) {
+      const point =
+        usable[
+          (baseIndex + i * 3 + waypointIndex * (5 + round * 2) + waypointIndex * 11) %
+            usable.length
+        ];
+      if (!point) {
+        continue;
+      }
+      waypoints.push(point);
+    }
 
-    if (!first || !second || first === second) {
+    if (waypoints.length !== waypointCount) {
       continue;
     }
 
-    const angleDelta = normalizeBearingDelta(first.bearing - second.bearing);
-    if (angleDelta < 45 || angleDelta > 170) {
+    const uniquePoints = new Set(
+      waypoints.map((point) => `${point.lat.toFixed(5)}|${point.lng.toFixed(5)}`)
+    );
+    if (uniquePoints.size !== waypointCount) {
       continue;
     }
 
-    const between = haversineMeters(first, second);
-    if (between < 120) {
+    const bearings = waypoints.map((point) => point.bearing).sort((a, b) => a - b);
+    let minGap = 360;
+    for (let index = 0; index < bearings.length; index += 1) {
+      const current = bearings[index];
+      const next = bearings[(index + 1) % bearings.length] + (index + 1 === bearings.length ? 360 : 0);
+      minGap = Math.min(minGap, next - current);
+    }
+
+    if (minGap < 25) {
       continue;
+    }
+
+    let pairwisePenalty = 0;
+    for (let index = 1; index < waypoints.length; index += 1) {
+      const between = haversineMeters(waypoints[index - 1], waypoints[index]);
+      if (between < 120) {
+        pairwisePenalty += 250;
+      }
     }
 
     const legBalance =
-      Math.abs(first.distance - idealLeg) +
-      Math.abs(second.distance - idealLeg) +
-      Math.abs(angleDelta - 120) * 3;
+      waypoints.reduce((sum, point) => sum + Math.abs(point.distance - idealLeg), 0) +
+      Math.abs(minGap - 360 / waypointCount) * 2 +
+      pairwisePenalty;
 
     scoredCandidates.push({
-      w1: { lat: first.lat, lng: first.lng },
-      w2: { lat: second.lat, lng: second.lng },
+      waypoints: waypoints.map((point) => ({ lat: point.lat, lng: point.lng })),
       score: legBalance,
     });
   }
 
   scoredCandidates.sort((a, b) => a.score - b.score);
-  return scoredCandidates.slice(0, MAX_CANDIDATES).map(({ w1, w2 }) => ({ w1, w2 }));
+  return scoredCandidates
+    .slice(0, MAX_CANDIDATES)
+    .map(({ waypoints }) => ({ waypoints }));
 }
 
 function dedupeCandidates(candidates) {
@@ -521,12 +714,13 @@ function dedupeCandidates(candidates) {
   const result = [];
 
   for (const candidate of candidates) {
-    const key = [
-      candidate.w1.lat.toFixed(4),
-      candidate.w1.lng.toFixed(4),
-      candidate.w2.lat.toFixed(4),
-      candidate.w2.lng.toFixed(4),
-    ].join("|");
+    const key = (candidate.waypoints || [])
+      .map((point) => `${point.lat.toFixed(4)}|${point.lng.toFixed(4)}`)
+      .join("|");
+
+    if (!key) {
+      continue;
+    }
 
     if (!seen.has(key)) {
       seen.add(key);
@@ -542,12 +736,19 @@ function dedupeCandidates(candidates) {
 }
 
 function buildCandidates(targetMeters, round = 0, walkablePoints = []) {
-  const networkCandidates = buildNetworkCandidates(targetMeters, round, walkablePoints);
-  const fallbackCandidates = buildFallbackCandidates(targetMeters, round);
+  const stage = SEARCH_STAGES[Math.min(round, SEARCH_STAGES.length - 1)] || SEARCH_STAGES[0];
+  const waypointCounts = stage.waypointCounts || [2, 3];
+
+  const networkCandidates = waypointCounts.flatMap((waypointCount) =>
+    buildNetworkCandidates(targetMeters, round, walkablePoints, waypointCount)
+  );
+  const fallbackCandidates = waypointCounts.flatMap((waypointCount) =>
+    buildFallbackCandidates(targetMeters, round, waypointCount)
+  );
   return dedupeCandidates([...networkCandidates, ...fallbackCandidates]);
 }
 
-async function evaluateCandidateBatch(batch, targetMeters, seen) {
+async function evaluateCandidateBatch(batch, targetMeters, seen, toleranceMeters) {
   const routes = await Promise.all(
     batch.map(async (candidate) => {
       try {
@@ -562,6 +763,7 @@ async function evaluateCandidateBatch(batch, targetMeters, seen) {
   let accepted = null;
   let best = null;
   let smallestDiff = Number.POSITIVE_INFINITY;
+  let bestScore = Number.POSITIVE_INFINITY;
 
   for (const item of routes) {
     if (!item) {
@@ -575,17 +777,22 @@ async function evaluateCandidateBatch(batch, targetMeters, seen) {
 
     const diff = Math.abs(item.route.meters - targetMeters);
     const candidateResult = { ...item.route, hash };
+    const score = routeQualityScore(candidateResult, targetMeters);
+
+    if (score < bestScore) {
+      best = candidateResult;
+      bestScore = score;
+    }
 
     if (diff < smallestDiff) {
-      best = candidateResult;
       smallestDiff = diff;
     }
 
-    if (diff <= METER_TOLERANCE) {
-      if (!accepted || diff < accepted.meterDelta) {
+    if (diff <= toleranceMeters) {
+      if (!accepted || score < accepted.score) {
         accepted = {
           route: candidateResult,
-          meterDelta: diff,
+          score,
         };
       }
     }
@@ -784,25 +991,31 @@ async function suggestRoute() {
   suggestBtn.disabled = true;
 
   try {
-    const walkablePoints = await withTimeout(
-      fetchWalkablePoints(targetMeters),
-      WALKABLE_FETCH_SOFT_TIMEOUT_MS,
-      []
-    );
-    if (!walkablePoints.length) {
-      statusEl.textContent = "Fant ikke nok stidata i området akkurat nå. Prøver med reserveforslag…";
-    }
     const seen = new Set(getSeen());
     let accepted = null;
     let best = null;
     let smallestDiff = Number.POSITIVE_INFINITY;
 
     for (let round = 0; round < MAX_SEARCH_ROUNDS && !accepted; round += 1) {
+      const stage = SEARCH_STAGES[Math.min(round, SEARCH_STAGES.length - 1)] || SEARCH_STAGES[0];
+      const toleranceMeters = Math.max(80, targetMeters * stage.tolerancePct);
+      statusEl.textContent = `Prøver ${stage.label} toleranse (${roundMeters(toleranceMeters)} meter)…`;
+
+      const walkablePoints = await withTimeout(
+        fetchWalkablePoints(targetMeters, stage.radiusScale),
+        WALKABLE_FETCH_SOFT_TIMEOUT_MS,
+        []
+      );
+
+      if (!walkablePoints.length && round === 0) {
+        statusEl.textContent = "Fant ikke nok stidata i området. Bruker reserveforslag og utvider søk…";
+      }
+
       const candidates = buildCandidates(targetMeters, round, walkablePoints);
 
       for (let index = 0; index < candidates.length && !accepted; index += ROUTE_BATCH_SIZE) {
         const batch = candidates.slice(index, index + ROUTE_BATCH_SIZE);
-        const result = await evaluateCandidateBatch(batch, targetMeters, seen);
+        const result = await evaluateCandidateBatch(batch, targetMeters, seen, toleranceMeters);
 
         if (result.smallestDiff < smallestDiff) {
           best = result.best;
@@ -815,15 +1028,32 @@ async function suggestRoute() {
       }
     }
 
-    if (!accepted) {
-      if (best) {
-        const meterDelta = roundMeters(Math.abs(best.meters - targetMeters));
-        const bestSteps = Math.round(best.meters / WALKING_STRIDE_METERS);
-        const stepDelta = Math.abs(bestSteps - requestedSteps);
-        statusEl.textContent = `Fant ingen nye turer innen ±${roundMeters(METER_TOLERANCE)} meter langs gåbare veier/stier. Nærmeste var ${meterDelta} meter (~${stepDelta} skritt) unna.`;
-      } else {
-        statusEl.textContent = `Fant ingen nye turer innen ±${roundMeters(METER_TOLERANCE)} meter. Prøv annet startpunkt nær gangvei/sti.`;
+    if (!accepted && isNearOsloCenter(startPoint)) {
+      const osloFallbackCandidates = getOsloFallbackCandidates(targetMeters);
+      const osloResult = await evaluateCandidateBatch(
+        osloFallbackCandidates,
+        targetMeters,
+        seen,
+        Math.max(120, targetMeters * 0.15)
+      );
+
+      if (osloResult.smallestDiff < smallestDiff) {
+        best = osloResult.best;
+        smallestDiff = osloResult.smallestDiff;
       }
+
+      if (osloResult.accepted) {
+        accepted = osloResult.accepted;
+      }
+    }
+
+    if (!accepted && best) {
+      accepted = best;
+    }
+
+    if (!accepted) {
+      statusEl.textContent =
+        "Fant ingen rute akkurat nå. Prøv igjen eller flytt startpunkt nær gangvei/sti.";
       suggestionEl.textContent = "Ingen rute innen ønsket toleranse akkurat nå.";
       setCurrentRoute(null);
       stopNavigation();
@@ -841,8 +1071,9 @@ async function suggestRoute() {
 
     setCurrentRoute({ ...accepted, steps });
 
-    suggestionEl.textContent = `Ca. ${meterValue} meter (${distanceKm} km / ${estimatedSteps} skritt), estimert tid ${formatDuration(accepted.seconds)}.`;
-    statusEl.textContent = `Nytt turforslag klart (avvik ${meterDelta} meter).`;
+    const fallbackTag = accepted.templateName ? ` (${accepted.templateName})` : "";
+    suggestionEl.textContent = `Ca. ${meterValue} meter (${distanceKm} km / ${estimatedSteps} skritt), estimert tid ${formatDuration(accepted.seconds)}.${fallbackTag}`;
+    statusEl.textContent = `Turforslag klart (avvik ${meterDelta} meter).`;
 
     const now = new Date();
     saveSuggestion(
