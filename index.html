@@ -21,15 +21,20 @@
   <main class="app">
     <header class="top">
       <h1>Ønsketur</h1>
-      <p>Finn rundtur i nærområdet basert på skritt.</p>
+      <p>Finn rundtur i nærområdet basert på ønsket distanse.</p>
     </header>
 
     <section class="panel controls">
-      <label for="steps">Ønsket antall skritt</label>
+      <label for="meters">Ønsket distanse (meter)</label>
       <div class="input-row">
-        <input id="steps" type="number" min="500" step="100" value="4000" inputmode="numeric" />
+        <input id="meters" type="number" min="300" step="50" value="3000" inputmode="numeric" />
         <button id="suggestBtn" type="button">Få turforslag</button>
       </div>
+      <div class="calc-row" aria-live="polite">
+        <label for="steps">Skritt (kalkulator)</label>
+        <input id="steps" type="number" min="500" step="100" value="4000" inputmode="numeric" />
+      </div>
+      <small>Kalkulatoren antar 0,75 meter per skritt.</small>
       <button id="installBtn" type="button" class="secondary install hidden">Installer app</button>
       <small>Trykk i kartet for å velge startpunkt.</small>
       <p id="status" class="status">Henter posisjon…</p>

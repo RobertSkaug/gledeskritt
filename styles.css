@@ -58,6 +58,18 @@ label {
   gap: 8px;
 }
 
+.calc-row {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.calc-row label {
+  margin-bottom: 0;
+  font-weight: 500;
+  color: var(--muted);
+}
+
 input,
 button {
   font-size: 16px;
