@@ -1,3 +1,0 @@
-window.APP_CONFIG = {
-  GOOGLE_MAPS_API_KEY: "AIzaSyBqxmujTv387UPAbPHRGSW0IxaEA1f9shY",
-};

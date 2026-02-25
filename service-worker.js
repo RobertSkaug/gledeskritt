@@ -4,9 +4,10 @@ const APP_SHELL = [
   "./index.html",
   "./styles.css",
   "./app.js",
-  "./config.js",
   "./manifest.webmanifest",
   "./icon.svg",
+  "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
+  "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
 ];
 
 self.addEventListener("install", (event) => {
