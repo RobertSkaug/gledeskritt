@@ -1,19 +1,36 @@
 # Ønsketur (MVP)
 
-Mobilvennlig webapp som foreslår gåturer basert på ønsket antall skritt.
+Mobilvennlig webapp som foreslår gåturer i Google Maps basert på ønsket distanse/skritt.
 
 ## Funksjoner
 
 - Velg startpunkt ved å trykke i kartet (pin oppdateres).
-- Skriv inn ønsket antall skritt og hent turforslag.
-- Turforslag må være innen ±200 skritt fra ønsket verdi.
-- Skrittestimat beregnes fra gådistanse (gåprofil) i ruten.
-- Turkandidater bygges primært fra faktiske gåbare stier, gangveier og veier i OpenStreetMap (med fallback hvis datasøk feiler).
-- Rutesøk kjøres i parallelle batcher for raskere forslag.
+- Tegn en lasso i kartet for ønsket område.
+- Skriv inn ønsket distanse/skritt og slingringsmonn.
+- Få 2–3 fargekodede turforslag innenfor lassoen.
+- Skrittestimat beregnes fra gådistanse i ruten.
 - Start tur med enkel turn-by-turn veiledning i appen.
 - Du kan åpne samme rute i Google Maps for ekstern navigator.
 - Foreslåtte turer logges lokalt i nettleseren.
 - Tidligere forslag blir markert som brukt, så samme tur ikke foreslås igjen.
+
+## Google Maps-oppsett
+
+Appen krever Google Maps JavaScript API med aktiv API-nøkkel.
+
+1. Opprett API-nøkkel i Google Cloud.
+2. Aktiver disse API-ene:
+	 - Maps JavaScript API
+	 - Directions API
+3. Legg nøkkelen i `config.js`:
+
+```js
+window.APP_CONFIG = {
+	GOOGLE_MAPS_API_KEY: "DIN_NOKKEL_HER",
+};
+```
+
+Tips: Begrens nøkkelen til ditt domene og riktige API-er i Google Cloud Console.
 
 ## Kjøring lokalt
 
@@ -53,6 +70,5 @@ Repoet er satt opp med workflow for automatisk publisering ved push til `main`.
 
 ## Teknisk
 
-- Kart: Leaflet + CARTO (OpenStreetMap-data)
-- Ruting: OSRM demo-endepunkt (`router.project-osrm.org`)
+- Kart + ruting: Google Maps JavaScript API + Directions API
 - Lagring: `localStorage`
