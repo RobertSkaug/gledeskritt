@@ -53,6 +53,6 @@ Repoet er satt opp med workflow for automatisk publisering ved push til `main`.
 
 ## Teknisk
 
-- Kart: Leaflet + OpenStreetMap
+- Kart: Leaflet + CARTO (OpenStreetMap-data)
 - Ruting: OSRM demo-endepunkt (`router.project-osrm.org`)
 - Lagring: `localStorage`
